@@ -10,14 +10,26 @@ https://opensource.org/licenses/MIT.
 
 helper functions commonly used by OAA integrations
 """
+
 import base64
+from collections.abc import Mapping, Sequence
 import json
-import os
 import logging
+from typing import TypeVar, TypeAlias
+
+from .client_v2 import OAAClient
+
+JSON: TypeAlias = (
+    Mapping[str, "JSON"] | Sequence["JSON"] | str | int | float | bool | None
+)
+T = TypeVar("T")
 
 log = logging.getLogger(__name__)
 
-def log_arg_error(log: object, arg: str = None, env: str = None) -> None:
+
+def log_arg_error(
+    log: logging.Logger, arg: str | None = None, env: str | None = None
+) -> None:
     """Helper function for logging errors when loading parameters
 
     Helper function used to create consistent messages in connectors when required parameters can be set at command
@@ -35,17 +47,21 @@ def log_arg_error(log: object, arg: str = None, env: str = None) -> None:
     """
 
     if arg and env:
-        log.error(f"Unable to load required parameter, must supply {arg} or set OS environment variable {env}")
+        log.error(
+            f"Unable to load required parameter, must supply {arg} or set OS environment variable {env}"
+        )
     elif arg and not env:
         log.error(f"Unable to load required parameter, must supply {arg}")
     elif env:
-        log.error(f"Unable to load required parameter, must set OS environment variable {env}")
+        log.error(
+            f"Unable to load required parameter, must set OS environment variable {env}"
+        )
     else:
         raise Exception("Must provide arg or env to include in error message")
     return
 
 
-def load_json_from_file(json_path: str) -> dict:
+def load_json_from_file(json_path: str) -> JSON:
     """Load JSON from file
 
     Args:
@@ -68,8 +84,9 @@ def load_json_from_file(json_path: str) -> dict:
 
     return data
 
+
 def encode_icon_file(icon_path: str) -> str:
-    """ read an icon file to a base64 encoded string
+    """read an icon file to a base64 encoded string
 
     Args:
         icon_path (str): Path to icon file on disk
@@ -83,7 +100,8 @@ def encode_icon_file(icon_path: str) -> str:
 
     return b64_icon.decode()
 
-def exists_in_query_array(value_to_find, input_array) -> bool:
+
+def exists_in_query_array(value_to_find: T, input_array: list[T]) -> bool:
     for query in input_array:
         if query["name"] == value_to_find:
             return True
@@ -91,7 +109,9 @@ def exists_in_query_array(value_to_find, input_array) -> bool:
     return False
 
 
-def build_report(veza_con, report_definition: dict) -> dict:
+def build_report(
+    veza_conn: OAAClient, report_definition: dict[str, object]
+) -> dict[str, object]:
     """Creates or updates a Veza report from a dictionary
 
     Creates a report and containing queries from a dictionary definition. Function will create any queries it does not
@@ -125,7 +145,7 @@ def build_report(veza_con, report_definition: dict) -> dict:
     report_queries = report_definition.get("queries", [])
 
     # get all quires to know which queries need to be created and which don't
-    all_queries = veza_con.get_queries()
+    all_queries = veza_conn.get_queries()
     query_names = {}
     for q in all_queries:
         if q.get("query_type") == "SYSTEM_CREATED":
@@ -137,18 +157,20 @@ def build_report(veza_con, report_definition: dict) -> dict:
     query_in_report_name = []
     for query in report_definition.get("queries", []):
         if query["name"] in query_names:
-            log.debug(f"Found existing query with same name, using for report, {query['name']}")
+            log.debug(
+                f"Found existing query with same name, using for report, {query['name']}"
+            )
             query_ids.append(query_names[query["name"]])
             query_in_report_name.append(query["name"])
         else:
             log.debug(f"Creating query {query['name']}")
-            response = veza_con.create_query(query=query)
+            response = veza_conn.create_query(query=query)
             query_ids.append(response["id"])
             query_in_report_name.append(query["name"])
 
     # get all reports to know if report already exists
     existing_reports = {}
-    for e in veza_con.get_reports():
+    for e in veza_conn.get_reports():
         id = e.get("id")
         name = e.get("name")
         existing_reports[name] = id
@@ -157,10 +179,14 @@ def build_report(veza_con, report_definition: dict) -> dict:
     if report_name not in existing_reports:
         # create a new report
         log.debug("Creating new report")
-        report_definition = { "name": report_name, "description": report_name, "queries": []}
+        report_definition = {
+            "name": report_name,
+            "description": report_name,
+            "queries": [],
+        }
         for id in query_ids:
             report_definition["queries"].append({"query": id})
-        response = veza_con.create_report(report=report_definition)
+        response = veza_conn.create_report(report=report_definition)
     else:
         # update existing report
         report_id = existing_reports[report_name]
@@ -170,11 +196,13 @@ def build_report(veza_con, report_definition: dict) -> dict:
             # if report exists, only add new queries
             if exists_in_query_array(query_name, report_queries):
                 continue
-            response = veza_con.add_query_report(report_id=report_id, query_id=query_names[query_name])
+            response = veza_conn.add_query_report(
+                report_id=report_id, query_id=query_names[query_name]
+            )
 
     # if the report is the exact same, it existed before so get report
     if response == {}:
-        return veza_con.get_report_by_id(id=existing_reports[report_name])
+        return veza_conn.get_report_by_id(id=existing_reports[report_name])
 
     return response
 
